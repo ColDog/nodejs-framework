@@ -1,20 +1,19 @@
-var listTpl = `
-<ul>
-  {% for x in list %}
-    <li>{{ x }}</li>
-  {% endfor %}
-</ul>
-{% if name %}
-  <h1>{{ name }}</h1>
-{% endif %}
-`
-
-var page = `<h1>Hello There</h1>{% render list({name: name, list: list}) %}<p>Hi there {{ name }}</p>`
-
 var components = {}
+var viewCache = {}
+
+function addTemplates() {
+  var tpls = ''
+  Object.keys(viewCache).forEach(function(name) {
+    tpls += '<script type="text/template" id="component-'+ name +'">' + viewCache[name] + '</script>'
+  })
+  return tpls
+}
 
 function Component(opts) {
+  this.mounts = opts.mounts
+  this.source = opts.source
   this.data = opts.data || {}
+  this.extends = opts.extends
   this.tpl = opts.tpl
   this.components = opts.components
   this.compiled = null
@@ -29,10 +28,35 @@ function Component(opts) {
         self.data[key] = data[key]
       })
     }
+
+    if (!this.tpl) {
+      var tpl = this.load(this.source)
+      if (this.extends) {
+        var extension = this.load(this.extends)
+        this.tpl = extension.replace(/\{%[ ]*yield[ ]*%}/i, tpl)
+      } else {
+        this.tpl = tpl
+      }
+    }
+
     if (!this.compiled) {
       this.compiled = this.compile()
     }
+
     return this.compiled()
+  }
+
+  this.load = function(name) {
+    if (typeof window == 'undefined') {
+      viewCache[name] = require('fs').readFileSync('./views/'+name+'.html', 'utf8')
+    } else {
+      viewCache[name] =  document.getElementById('component-'+name).innerHTML
+    }
+    return viewCache[name]
+  }
+
+  this.mount = function() {
+    document.querySelector(this.mounts).innerHTML = this.render()
   }
 
   this.compile = function() {
@@ -71,9 +95,7 @@ function Component(opts) {
           break
         case 'render':
           var args = line.replace('render', '').trim().split(/[()]/)
-          code += 'r.push("<span>")'
           code += 'r.push(this.components["'+ args[0] +'"].render('+ args[1] +'));'
-          code += 'r.push("</span>")'
           break
       }
     }
@@ -90,27 +112,32 @@ function Component(opts) {
 
     add(tpl.substr(cursor, tpl.length - cursor));
     code += 'return r.join("");'; // <-- return the result
+    console.log(code)
     return new Function(code.replace(/[\r\t\n]/g, '')).bind(this)
   }
 }
 
 var List = new Component({
-  tpl: listTpl,
+  source: 'list',
   data: {}
 })
 
 var Page = new Component({
-  tpl: page,
+  source: 'main',
+  extends: 'app',
+  mounts: 'body',
   data: {
     list: ['a', 'b'],
     name: 'Colin'
-  },
-  resources: {
-
   },
   components: {
     list: List
   }
 })
 
-console.log(Page.render())
+if (typeof window == 'undefined') {
+  module.exports.Component = Component
+  module.exports.viewCache = viewCache
+  module.exports.addTemplates = addTemplates
+  module.exports.Page = Page
+}
