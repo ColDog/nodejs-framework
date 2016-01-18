@@ -1,13 +1,12 @@
 var components = {}
 var viewCache = {}
+var templateCache = null
 
-function addTemplates() {
-  var tpls = ''
-  Object.keys(viewCache).forEach(function(name) {
-    tpls += '<script type="text/template" id="component-'+ name +'">' + viewCache[name] + '</script>'
-  })
-  return tpls
+
+var Controller = {
+
 }
+
 
 function Component(opts) {
   this.mounts = opts.mounts
@@ -20,6 +19,69 @@ function Component(opts) {
   this.id = opts.id || 'comp-' + Math.random().toString(36).substring(2, 10)
   this.events = opts.events
   components[this.id] = this
+
+  this.set = function(k, v) {
+    this.data[k] = v
+    if (typeof window == 'undefined') {
+      this.mount()
+    }
+  }
+
+  this.addTemplates = function() {
+    if (!templateCache) {
+      templateCache = ''
+      Object.keys(viewCache).forEach(function(name) {
+        templateCache += '<script type="text/template" id="component-'+ name +'">' + viewCache[name] + '</script>'
+      })
+    }
+    return templateCache
+  }
+
+  this.prepareAll = function(done) {
+    var acts = []
+    Object.keys(this.components).forEach(function(key) {
+      acts.push(self.components[key].prepare)
+    })
+    acts.push(done.bind(this))
+    (function next() {
+      if(acts.length > 0) {
+        var f = acts.shift();
+        f.apply(self, [next]);
+      }
+    })();
+  }
+
+  this.renderPage = function(page) {
+    this.prepareAll(function() {
+      var html = this.render()
+      html += this.addTemplates()
+      page(html)
+    })
+  }
+
+  this.prepare = function(done) {
+    var self = this
+    var data = this.data
+    var counter = 0
+    Object.keys(data).forEach(function(key) {
+      if (data[key] instanceof Promise) {
+        counter++
+        Promise.resolve(data[key]).then(
+          function(res) {
+            self.set(key, res)
+            counter--
+            if (counter == 0) {
+              done()
+            }
+          },
+          function(err) {
+            counter--
+            console.warn(err)
+          }
+        )
+      }
+    })
+  }
 
   this.render = function(data) {
     var self = this;
@@ -75,7 +137,7 @@ function Component(opts) {
     }
 
     var scope = function(line) {
-      code += 'r.push(' + line + ');\n'
+      code += 'r.push(" " +' + line + '+ " ");\n'
     }
 
     var directive = function(line) {
@@ -112,10 +174,10 @@ function Component(opts) {
 
     add(tpl.substr(cursor, tpl.length - cursor));
     code += 'return r.join("");'; // <-- return the result
-    console.log(code)
     return new Function(code.replace(/[\r\t\n]/g, '')).bind(this)
   }
 }
+
 
 var List = new Component({
   source: 'list',
